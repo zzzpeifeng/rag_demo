@@ -1,0 +1,22 @@
+# 环境变量和密钥
+.env
+
+# 虚拟环境
+.venv/
+venv/
+
+# 向量数据库（运行时生成）
+chroma.db/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+
+# 系统文件
+.DS_Store
+Thumbs.db
