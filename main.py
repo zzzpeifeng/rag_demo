@@ -33,6 +33,52 @@ def split_into_chunks(doc_file) -> list[str]:
     return [chunk for chunk in content.split('\n\n')]
 
 
+def split_into_chunks_sliding_window(doc_file, chunk_size=200, overlap=50) -> list[str]:
+    """
+        滑窗重叠切片（优先在标点处切分，避免切断句子）
+    :param doc_file: 文档路径
+    :param chunk_size: 每块的目标字数
+    :param overlap: 相邻块的重叠字数
+    :return: 切片列表
+    """
+    with open(doc_file, 'r') as file:
+        content = file.read()
+
+    if len(content) <= chunk_size:
+        return [content]
+
+    # 切分标点优先级：句末标点 > 换行 > 逗号/顿号
+    sentence_end = '。！？!?；;\n'
+    soft_punct = '，,、：:'
+
+    def find_cut_pos(target: int) -> int:
+        """在 target 附近寻找最近的标点位置，找不到则返回 target"""
+        search_range = min(chunk_size // 2, target)
+        # 先往前找句末标点
+        for i in range(target, max(target - search_range, 0), -1):
+            if content[i] in sentence_end:
+                return i + 1
+        # 再往前找软标点
+        for i in range(target, max(target - search_range, 0), -1):
+            if content[i] in soft_punct:
+                return i + 1
+        return target
+
+    chunks = []
+    start = 0
+    while start < len(content):
+        raw_end = min(start + chunk_size, len(content))
+        if raw_end < len(content):
+            end = find_cut_pos(raw_end)
+        else:
+            end = raw_end
+        chunks.append(content[start:end])
+        if end >= len(content):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
+
+
 def embed_chunk(chunk: str) -> list[float]:
     """
         将切片向量化
@@ -120,8 +166,8 @@ def generate(query: str, context_chunks: list[str]) -> str:
 
 
 def before():
-    # 文档切片
-    chunks = split_into_chunks('doc.md')
+    # 文档切片（滑窗重叠，优先在标点处切分）
+    chunks = split_into_chunks_sliding_window('doc.md')
     for i, chunk in enumerate(chunks):
         print(f'[{i}] {chunk}')
 
@@ -129,6 +175,11 @@ def before():
     embeddings = [embed_chunk(chunk) for chunk in chunks]
 
     # 拿到向量库的collection
+
+    # 清空向量库旧数据
+    existing = default_collection.get()
+    if existing['ids']:
+        default_collection.delete(ids=existing['ids'])
 
     # 存入向量库
     save_embeddings(chunks, embeddings)
