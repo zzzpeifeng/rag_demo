@@ -13,6 +13,10 @@ from openai import OpenAI
 load_dotenv()
 
 embdding_model = SentenceTransformer('shibing624/text2vec-base-chinese')
+
+# 重排模型：模块级只加载一次，避免每次调用 rerank() 都重新加载权重
+cross_encoder = CrossEncoder('cross-encoder/mmarco-mMiniLMv2-L12-H384-v1')
+
 chromadb_client = chromadb.PersistentClient('./chroma.db')
 default_collection = chromadb_client.get_or_create_collection(name='default')
 
@@ -126,7 +130,6 @@ def rerank(query: str, retrieved_chunks: list[str], top_k: int) -> tuple[list[st
         重排
         返回重排后的 top_k 片段，以及最高分（用于相关性判断）
     """
-    cross_encoder = CrossEncoder('cross-encoder/mmarco-mMiniLMv2-L12-H384-v1')
     pairs = [(query, chunk) for chunk in retrieved_chunks]
     scores = cross_encoder.predict(pairs)
 
