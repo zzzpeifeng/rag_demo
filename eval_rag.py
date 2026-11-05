@@ -5,16 +5,29 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
-from main import split_into_chunks_sliding_window, embed_chunk
+from main import split_into_chunks_sliding_window, embed_chunk, llm_client
 import numpy as np
 
 embdding_model = SentenceTransformer('shibing624/text2vec-base-chinese')
 
-# 可选重排器：None=不重排（召回直接取 top-3）；也可指定其他模型做对照
-# RERANKER = None
+# 检索模式：reranker=召回+重排 / hyde=LLM 编假答案再向量检索
+MODE = "hyde"
+# 重排器（仅 MODE=reranker 时生效）
 RERANKER = "BAAI/bge-reranker-base"
+# RERANKER = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+# RERANKER = None  # 不重排，召回直取 top-3
 
-cross_encoder = CrossEncoder(RERANKER) if RERANKER else None
+cross_encoder = CrossEncoder(RERANKER) if (MODE == "reranker" and RERANKER) else None
+
+
+def hyde_expand(query: str) -> str:
+    """HyDE：让 LLM 编一段"假答案"，用假答案去做向量检索（陈述句比疑问句更接近答案的向量区域）"""
+    resp = llm_client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{"role": "user", "content":
+            f"请直接编写一段 50 字左右的陈述性文字，作为下面这个问题的可能答案（不需要真实，写得像答案即可）：\n{query}"}],
+        temperature=0.7)
+    return resp.choices[0].message.content.strip()
 
 # ===================== 15 道测试题 =====================
 # gold_anchors: 答案所在原文的唯一子串（跨切片策略定位）
@@ -85,8 +98,13 @@ def main():
 
     for case in CASES:
         q = case["question"]
-        # 召回 top5
-        ret_idx = retrieve_chunks(q, chunks, chunk_embeddings, 5)
+        # 召回 top5（hyde 模式先用 LLM 编假答案再检索）
+        if MODE == "hyde":
+            fake = hyde_expand(q)
+            print(f"[HyDE] {case['id']} 假答案: {fake[:50]}...")
+            ret_idx = retrieve_chunks(fake, chunks, chunk_embeddings, 5)
+        else:
+            ret_idx = retrieve_chunks(q, chunks, chunk_embeddings, 5)
         ret_chunks = [chunks[i] for i in ret_idx]
         # 重排 top3（RERANKER=None 时走"无重排基线"：召回直接取前3，分数用 rank1 的 cosine）
         if cross_encoder is None:
